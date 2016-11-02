@@ -5,8 +5,8 @@ Usage: mock_cmxdata_generator.py [options]
 Options:
     -e <entity_count>, --entity-count=<entity_count>  Number of entities to generate [default: 100]
     -p <update_period>, --period=<update_period>  Time (secs) between location updates [default: 15]
-    -m <max_speed>, --max-speed=<max_speed>  Max forklift speed (KPH)) [default: 30]
-    -d <start_date>, --start-date=<date>  Start date [default: 2016-09-01]
+    -m <max_speed>, --max-speed=<max_speed>  Max forklift speed (KPH)) [default: 10]
+    -d <start_date>, --start-date=<date>  Start date [default: 2016-08-01]
     -h <host>, --host=<server_name>  Name of Conduce server [default: dev-app.conduce.com]
     -a <api_key>, --apikey=<key>  API Key
     -d <dataset>, --dataset=<id>  Dataset ID
@@ -23,7 +23,8 @@ import json
 import os
 import sys
 import httplib,urllib
-
+import time
+import requests
 
 ENTITY_COUNT=100
 entities=[]
@@ -31,8 +32,8 @@ entities=[]
 # -------------------- Map
 
 # Coords of map/floor (mm)
-MAP_BOTTOM_LEFT=(-1271,468572)
-MAP_TOP_RIGHT=(147294,581721)
+MAP_BOTTOM_LEFT=(0,0)
+MAP_TOP_RIGHT=(150000,160000)
 
 # Dimensions of map/floor location
 X_AXIS_POINTS=0
@@ -49,7 +50,7 @@ def getDelta( speedMPS ):
 
 # Range of entity speeds when moving (in KPH)
 SPEED_MIN_KPH=3
-SPEED_MAX_KPH=30
+SPEED_MAX_KPH=10
 
 #
 # Generate a random speed in meters/sec for an entity
@@ -64,9 +65,9 @@ def getSpeed():
 # Seconds between location updates
 UPDATE_PERIOD_S=15
 
-START_DATE='2016-09-01'
-START_TIME='06:00'
-STOP_TIME='18:00'
+START_DATE='2016-07-01'
+START_TIME='02:00'
+STOP_TIME='03:00'
 
 #
 # Concatenate the date/time and return the time in seconds.
@@ -92,9 +93,7 @@ def getDays(dateStr):
 def initEntities(entityCount, startTime, startLoc):
     #print "Entities: ", entityCount
 
-    #attribs = []
-    # These are more for debugging purposes than anything else; can be removed after testing
-    attribs = [ { "key":"spd",  "type":"DOUBLE", "double_value":1.0 } ]
+    attribs = [ { "key":"equip",  "type":"STRING", "str_value":"scanner" } ]
 
     loc = []
     pt = { "x":float(startLoc[1]), "y":float(startLoc[0]), "z":0 }
@@ -103,7 +102,7 @@ def initEntities(entityCount, startTime, startLoc):
     for i in range(entityCount):
         entity = {
             "identity": str(i+1),
-            "kind": "forklift",
+            "kind": "employee",
             "timestamp-ms": int(startTime * 1000),
             #"endtime_ms": int(startTime * 1000) + 24*3600000,
             "path": copy.deepcopy(loc),
@@ -136,26 +135,21 @@ def getNextMove( move, delta, pos ):
     
     x = posX
     y = posY
+    #print "pre ", move, x, y, delta
+
     if ( move == MOVE_RIGHT ):
-        x = posX + delta
-        if ( x > MAP_TOP_RIGHT[0] ):
-            move = MOVE_LEFT
-            x = posX - delta
+        x = min( (posX + delta), MAP_TOP_RIGHT[0] )
+    
     elif ( move == MOVE_LEFT ):
-        x = posX - delta
-        if ( x < MAP_BOTTOM_LEFT[0] ):
-            move = MOVE_RIGHT
-            x = posX + delta
+        x = max( (posX - delta), MAP_BOTTOM_LEFT[0] )
+
     elif ( move == MOVE_UP ):
-        y = posY + delta
-        if ( y > MAP_TOP_RIGHT[1] ):
-            move = MOVE_DOWN
-            y = posY - delta
+        y = min( (posY + delta), MAP_TOP_RIGHT[1] )
+
     else: # DOWN
-        y = posY - delta
-        if ( y < MAP_BOTTOM_LEFT[1] ):
-            move = MOVE_UP
-            y = posY + delta
+        y = max( (posY - delta), MAP_BOTTOM_LEFT[1] )
+
+    #print "post XY", x, y
     return (move, x, y)
 
 #
@@ -170,6 +164,7 @@ def updateEntityMovement( entity ):
         # Speed varies for each move
         newSpd = getSpeed()
         delta = getDelta( newSpd )
+        #print "New Spd, Delta", newSpd, delta
 
         # Assume the path location we're updating is the first/only one
         pos = entity.get("path")[0]
@@ -177,7 +172,6 @@ def updateEntityMovement( entity ):
         # Update entity
         pos["x"] = newMove[1]
         pos["y"] = newMove[2]
-        entity.get("attrs")[0]["double_value"] = newSpd
 
 
 def updateLocations(tm):
@@ -201,16 +195,42 @@ def printCSV():
         posY = pos["y"]
         print "%s, %d, %d" % (entity["identity"], int(posX), int(posY))
 
-def printEntities():
-    print getConduceEntitySetJSON()
-    #printCSV()
-    print ""
+def printEntities(timestampMs):
+    print
+    print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
+    #print getConduceEntitySetJSON()
+    printCSV()
 
 #
 # -------------------- Upload to Conduce
 #
+def waitForUploadJob(authStr, jobURL):
+    headers = { 'Authorization': authStr }
+    #print headers
+    
+    finished = False
+    while not finished:
+        time.sleep(0.5)
+        #print jobURL
+        response = requests.get(jobURL, headers=headers)
+        if int(response.status_code / 100) != 2:
+            print "Error code %s: %s" % (response.status_code, response.text)
+            return;
+        
+        if response.ok:
+            print response.content
+            msg = response.json()
+            if 'response' in msg:
+                print "Job completed successfully."
+                finished = True
+        else:
+            print resp, resp.content
+            break
 
 def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
+    print
+    print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
+    
     authStr = 'Bearer ' + apiKey
     URI = '/conduce/api/datasets/add_datav2/' + datasetId
     payload = getConduceEntitySetJSON()
@@ -230,6 +250,13 @@ def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
     print response.status, response.reason, response.read()
     connection.close()
 
+    #wait for the job to finish
+    job_loc = response.getheader('location')
+    if job_loc:
+        jobURL = "https://%s/conduce/api%s" % (hostServer, job_loc)
+        waitForUploadJob( authStr, jobURL )
+    else:
+        print "Error: Response contains no job location."
 
 #
 # -------------------- M A I N --------------------
@@ -246,32 +273,36 @@ def main():
     apiKey = str(arguments.get('--apikey'))
     datasetId = str(arguments.get('--dataset'))
 
+    if apiKey == 'None':
+        print "API Key required."
+        return
+    if datasetId == 'None':
+        print "Dataset ID required."
+        return
 
     X_AXIS_POINTS = MAP_TOP_RIGHT[0] - MAP_BOTTOM_LEFT[0]
     Y_AXIS_POINTS = MAP_TOP_RIGHT[1] - MAP_BOTTOM_LEFT[1]
-    
-    startX = int(MAP_BOTTOM_LEFT[0] + X_AXIS_POINTS/2)
-    startY = int(MAP_BOTTOM_LEFT[1] + Y_AXIS_POINTS/2)
-    startLoc = (startX,startY)
-    
+
+    #startX = int(MAP_BOTTOM_LEFT[0] + X_AXIS_POINTS/2)
+    #startY = int(MAP_BOTTOM_LEFT[1] + Y_AXIS_POINTS/2)
+    startLoc = MAP_BOTTOM_LEFT #(startX,startY)
+
     nDays = getDays(START_DATE)
     startDateTime = getTime(START_DATE, START_TIME)
     stopDateTime = getTime(START_DATE, STOP_TIME)
-    
+
     initEntities(ENTITY_COUNT, startDateTime, startLoc);
     uploadEntities(apiKey, datasetId, hostServer, startDateTime)
 
     for i in range(nDays):
         tm = startDateTime
-        #print "------", datetime.datetime.fromtimestamp(tm).strftime('%Y-%m-%d %H:%M:%S')
-        #printEntities()
+        #printEntities(tm)
 
         while ( tm < stopDateTime ):
             tm += UPDATE_PERIOD_S
-            #print datetime.datetime.fromtimestamp(tm).strftime('%Y-%m-%d %H:%M:%S')
             updateLocations(tm)
-            #printEntities()
-            uploadEntities(apiKey, datasetId, hostServer, startDateTime)
+            #printEntities(tm)
+            uploadEntities(apiKey, datasetId, hostServer, tm)
         
         # Jump to next day
         startDateTime += 86400

@@ -23,8 +23,9 @@ import json
 import os
 import sys
 import httplib,urllib
-
 import math
+import time
+import requests
 
 ENTITY_COUNT=100
 entities=[]
@@ -143,9 +144,7 @@ def getDays(dateStr):
 def initEntities(entityCount, startTime, startLoc):
     #print "Entities: ", entityCount
 
-    #attribs = []
-    # These are more for debugging purposes than anything else; can be removed after testing
-    attribs = [ { "key":"spd",  "type":"DOUBLE", "double_value":1.0 } ]
+    attribs = [ { "key":"equip",  "type":"STRING", "str_value":"scanner" } ]
 
     path = []
     pt = { "x":float(startLoc[1]), "y":float(startLoc[0]), "z":0 }
@@ -200,25 +199,19 @@ def getNextMove( move, pos, spd ):
         delta = getDelta( spd, LONG_MULT )
 
     if ( move == MOVE_RIGHT ):
-        x = posX + delta
-        if ( x > MAP_TOP_RIGHT[1] ):
-            move = MOVE_LEFT
-            x = posX - delta
+        x = min( (posX + delta), MAP_TOP_RIGHT[1] )
+    
     elif ( move == MOVE_LEFT ):
-        x = posX - delta
-        if ( x < MAP_BOTTOM_LEFT[1] ):
-            move = MOVE_RIGHT
-            x = posX + delta
+        x = max( (posX - delta), MAP_BOTTOM_LEFT[1] )
+
     elif ( move == MOVE_UP ):
-        y = posY + delta
-        if ( y > MAP_TOP_RIGHT[0] ):
-            move = MOVE_DOWN
-            y = posY - delta
+        y = min( (posY + delta), MAP_TOP_RIGHT[0] )
+    
     else: # DOWN
-        y = posY - delta
-        if ( y < MAP_BOTTOM_LEFT[0] ):
-            move = MOVE_UP
-            y = posY + delta
+        y = max( (posY - delta), MAP_BOTTOM_LEFT[0] )
+
+    #print "post XY", x, y
+
     return (move, x, y)
 
 #
@@ -244,7 +237,6 @@ def getEntityMovement( entity ):
     # Update entity
     pos["x"] = newMove[1]
     pos["y"] = newMove[2]
-    entity.get("attrs")[0]["double_value"] = newSpd
 
 
 def updateLocations(tm):
@@ -277,6 +269,29 @@ def printEntities():
 #
 # -------------------- Upload to Conduce
 #
+def waitForUploadJob(authStr, jobURL):
+    headers = { 'Authorization': authStr }
+    #print headers
+    
+    finished = False
+    while not finished:
+        time.sleep(0.5)
+        #print jobURL
+        response = requests.get(jobURL, headers=headers)
+        if int(response.status_code / 100) != 2:
+            print "Error code %s: %s" % (response.status_code, response.text)
+            return;
+        
+        if response.ok:
+            print response.content
+            msg = response.json()
+            if 'response' in msg:
+                print "Job completed successfully."
+                finished = True
+        else:
+            print resp, resp.content
+            break
+
 def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
     authStr = 'Bearer ' + apiKey
     URI = '/conduce/api/datasets/add_datav2/' + datasetId
@@ -297,6 +312,13 @@ def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
     print response.status, response.reason, response.read()
     connection.close()
 
+    #wait for the job to finish
+    job_loc = response.getheader('location')
+    if job_loc:
+        jobURL = "https://%s/conduce/api%s" % (hostServer, job_loc)
+        waitForUploadJob( authStr, jobURL )
+    else:
+        print "Error: Response contains no job location."
 
 
 
