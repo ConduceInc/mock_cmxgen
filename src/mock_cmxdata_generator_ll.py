@@ -15,7 +15,8 @@ Options:
 
 from docopt import docopt
 import time
-import datetime
+from datetime import datetime
+from datetime import timedelta
 from calendar import monthrange
 import random
 import copy
@@ -116,6 +117,8 @@ def getSpeed():
 # Seconds between location updates
 UPDATE_PERIOD_S=15
 
+TIME_OFFSET = int(round((datetime.now() - datetime.utcnow()).total_seconds()))
+
 START_DATE='2016-09-01'
 START_TIME='06:00'
 STOP_TIME='18:00'
@@ -131,7 +134,7 @@ def getTime(dateStr, timeStr):
 # Parse the date for the month and return how many days.
 #
 def getDays(dateStr):
-    dt_obj = datetime.datetime.strptime(dateStr, '%Y-%m-%d')
+    dt_obj = datetime.strptime(dateStr, '%Y-%m-%d')
     n = monthrange(dt_obj.year, dt_obj.month)[1]
     return n
 
@@ -262,7 +265,9 @@ def printCSV():
         posY = pos["y"]
         print "%d, forklift, %s, %.6f, %.6f" % (tm, entity["identity"], posY, posX)
 
-def printEntities():
+def printEntities(timestampMs):
+    print
+    print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
     #print getConduceEntitySetJSON()
     printCSV()
 
@@ -293,6 +298,9 @@ def waitForUploadJob(authStr, jobURL):
             break
 
 def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
+    print
+    print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
+
     authStr = 'Bearer ' + apiKey
     URI = '/conduce/api/datasets/add_datav2/' + datasetId
     payload = getConduceEntitySetJSON()
@@ -302,7 +310,6 @@ def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
         'Content-Length': len(payload)
     }
     #print headers
-    #print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
     print "Uploading ", hostServer, URI
     #print payload
 
@@ -352,22 +359,20 @@ def main():
     startLoc = MAP_BOTTOM_LEFT
 
     nDays = getDays(START_DATE)
-    startDateTime = getTime(START_DATE, START_TIME)
-    stopDateTime = getTime(START_DATE, STOP_TIME)
+    startDateTime = getTime(START_DATE, START_TIME) + TIME_OFFSET
+    stopDateTime = getTime(START_DATE, STOP_TIME) + TIME_OFFSET
     
     initEntities(ENTITY_COUNT, startDateTime, startLoc);
     uploadEntities(apiKey, datasetId, hostServer, startDateTime)
 
     for i in range(nDays):
         tm = startDateTime
-        #print "------", datetime.datetime.fromtimestamp(tm).strftime('%Y-%m-%d %H:%M:%S')
-        #printEntities()
+        #printEntities(tm)
 
         while ( tm < stopDateTime ):
             tm += UPDATE_PERIOD_S
-            #print datetime.datetime.fromtimestamp(tm).strftime('%Y-%m-%d %H:%M:%S')
             updateLocations(tm)
-            #printEntities()
+            #printEntities(tm)
             uploadEntities(apiKey, datasetId, hostServer, tm)
         
         # Jump to next day

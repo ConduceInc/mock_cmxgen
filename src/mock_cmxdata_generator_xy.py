@@ -15,7 +15,8 @@ Options:
 
 from docopt import docopt
 import time
-import datetime
+from datetime import datetime
+from datetime import timedelta
 from calendar import monthrange
 import random
 import copy
@@ -65,9 +66,11 @@ def getSpeed():
 # Seconds between location updates
 UPDATE_PERIOD_S=15
 
+TIME_OFFSET = int(round((datetime.now() - datetime.utcnow()).total_seconds()))
+
 START_DATE='2016-07-01'
-START_TIME='02:00'
-STOP_TIME='03:00'
+START_TIME='06:00'
+STOP_TIME='18:00'
 
 #
 # Concatenate the date/time and return the time in seconds.
@@ -80,7 +83,7 @@ def getTime(dateStr, timeStr):
 # Parse the date for the month and return how many days.
 #
 def getDays(dateStr):
-    dt_obj = datetime.datetime.strptime(dateStr, '%Y-%m-%d')
+    dt_obj = datetime.strptime(dateStr, '%Y-%m-%d')
     n = monthrange(dt_obj.year, dt_obj.month)[1]
     return n
 
@@ -197,7 +200,7 @@ def printCSV():
 
 def printEntities(timestampMs):
     print
-    print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
+    print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
     #print getConduceEntitySetJSON()
     printCSV()
 
@@ -229,7 +232,7 @@ def waitForUploadJob(authStr, jobURL):
 
 def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
     print
-    print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
+    print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
     
     authStr = 'Bearer ' + apiKey
     URI = '/conduce/api/datasets/add_datav2/' + datasetId
@@ -240,7 +243,6 @@ def uploadEntities(apiKey, datasetId, hostServer, timestampMs):
         'Content-Length': len(payload)
     }
     #print headers
-    #print datetime.datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
     print "Uploading ", hostServer, URI
     #print payload
 
@@ -288,8 +290,8 @@ def main():
     startLoc = MAP_BOTTOM_LEFT #(startX,startY)
 
     nDays = getDays(START_DATE)
-    startDateTime = getTime(START_DATE, START_TIME)
-    stopDateTime = getTime(START_DATE, STOP_TIME)
+    startDateTime = getTime(START_DATE, START_TIME) + TIME_OFFSET
+    stopDateTime = getTime(START_DATE, STOP_TIME) + TIME_OFFSET
 
     initEntities(ENTITY_COUNT, startDateTime, startLoc);
     uploadEntities(apiKey, datasetId, hostServer, startDateTime)
