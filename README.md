@@ -1,2 +1,2 @@
 # mock_cmxgen
-Scripts to generate location data for entities to upload. 
+Script to generate/upload location data and impact data for entities. 
