@@ -5,12 +5,14 @@ Usage: mock_data_generator.py [options]
 Options:
     -e <entity_count>, --entity-count=<entity_count>  Number of entities to generate [default: 100]
     -p <update_period>, --period=<update_period>  Time (secs) between location updates [default: 15]
-    -m <max_speed>, --max-speed=<max_speed>  Max forklift speed (KPH)) [default: 10]
-    -d <start_date>, --start-date=<date>  Start date [default: 2016-04-01]
+    -m <max_speed>, --max-speed=<max_speed>  Max forklift speed (KPH)) [default: 30]
+    -c <confidence>, --conf-dist=<distance>  Max location confidence radius (feet) [default: 1000.0]
+    -d <start_date>, --start-date=<date>  Start date [default: 2016-09-01]
     -h <host>, --host=<server_name>  Name of Conduce server [default: dev-app.conduce.com]
     -a <api_key>, --apikey=<key>  API Key
-    -c <cmx_dataset>, --cmx-dataset=<id>  CMX Dataset ID (Entities)
+    -x <cmx_dataset>, --cmx-dataset=<id>  CMX Dataset ID (Entities)
     -i <ims_dataset>, --ims-dataset=<id>  IMS Dataset ID (Impacts)
+    -g <format> --gen=<format>  Generate output in the given format (JSON | CSV) only; no uploading
 
 """
 
@@ -33,6 +35,12 @@ import requests
 ENTITY_COUNT=100
 entities=[]
 
+# Pick whether repeatable data is generated or not
+RANDOM_SEED=13
+#RANDOM_SEED=time.utcnow()
+
+# Generate data for output in the given format; no uploading
+GENONLY_FORMAT=None
 
 #
 # -------------------- Coordinates
@@ -160,7 +168,7 @@ UPDATE_PERIOD_S=15
 
 TIME_OFFSET = int(round((datetime.now() - datetime.utcnow()).total_seconds()))
 
-START_DATE='2016-04-01'
+START_DATE='2016-09-01'
 START_TIME='06:00'
 STOP_TIME='18:00'
 
@@ -183,6 +191,17 @@ def getDays(dateStr):
 
 # -------------------- Entity operations
 
+
+# Generate a confidence value for an entity poistion
+# The size of the circle around the entity location (feet), so
+# a larger circle == less confident of its position accuracy.
+MIN_CONFIDENCE_VALUE=10.0
+MAX_CONFIDENCE_VALUE=1000.0
+
+def getPosConfidenceMeters():
+    # Generate a confidence in feet and convert to meters
+    return int(round(0.3048 * random.triangular(MIN_CONFIDENCE_VALUE, MAX_CONFIDENCE_VALUE, 320.0), 0))
+
 #
 # Init and return a list of entities.
 #
@@ -190,7 +209,8 @@ def initEntities(entityCount, startTime, startLoc):
     #print "Entities: ", entityCount
 
     attribs = [
-        { "key":"heading", "type":"STRING", "str_value":"?" }
+        { "key":"heading", "type":"INT64", "int64-value":0 },
+        { "key":"confidence", "type":"INT64", "int64-value":0 }
     ]
 
     loc = []
@@ -216,7 +236,7 @@ MOVE_DOWN = 2
 MOVE_LEFT = 3
 MOVE_RIGHT = 4
 
-def getRandomMove():
+def getMove():
     val = random.randint(1, 100)
     if ( val < 26 ):
         return MOVE_UP
@@ -227,50 +247,49 @@ def getRandomMove():
     elif( val < 101 ):
         return MOVE_RIGHT
 
-
 def getNextMove( posX, posY ):
-    move = getRandomMove()
+    move = getMove()
     x = posX
     y = posY
     #print "Pre:", move, x, y
-    hdg = "?"
+    hdg = 0
 
     d = getDistanceMeters( getSpeedMPS(), UPDATE_PERIOD_S )
     
     if ( move == MOVE_UP ):
-        hdg = "N"
+        hdg = 0
         dyPct = getDistancePercent( d, Y_AXIS_METERS )
         y = min( (posY + dyPct), 100.0 )
 
     elif (move == MOVE_DOWN ):
-        hdg = "S"
+        hdg = 180
         dyPct = getDistancePercent( d, Y_AXIS_METERS )
         y = max( (posY - dyPct), 0.0 )
 
     elif ( move == MOVE_LEFT ):
-        hdg = "W"
+        hdg = 270
         dxPct = getDistancePercent( d, X_AXIS_METERS )
         x = max( (posX - dxPct), 0.0 )
 
     else: # MOVE_RIGHT
-        hdg = "E"
+        hdg = 90
         dxPct = getDistancePercent( d, X_AXIS_METERS )
         x = min( (posX + dxPct), 100.0 )
 
     #print "Move:", hdg, d, x, y
     return (hdg, x, y)
 
-#
 # Generate the next movement and update the entity.
-#
 def updateEntityPosition( entity ):
-    # Assume the path location we're updating is the first/only one
+    # Assume the path location we're updating is the first/only one?
     pos = entity.get("path")[0]
     newMove = getNextMove( pos["x"], pos["y"] )
-    hdg = entity.get("attrs")[0]
-    hdg["str_value"] = newMove[0]
     pos["x"] = newMove[1]
     pos["y"] = newMove[2]
+    hdg = entity.get("attrs")[0]
+    hdg["int64-value"] = newMove[0]
+    conf = entity.get("attrs")[1]
+    conf["int64-value"] = getPosConfidenceMeters()
 
 # Update all the entities locations for the given time
 def updateLocations(tm):
@@ -352,14 +371,14 @@ def getImpactEntity(mappedEntity, impact):
         "kind": "impact",
         "attrs": [
             {
-                "str-value": str(impact[0]),
-                "type": "STRING",
-                "key": "impact_level"
+                "int64-value": impact[0],
+                "type": "INT64",
+                "key": "level"
             },
             {
                 "str-value": str(impact[1]),
                 "type": "STRING",
-                "key": "impact_intensity"
+                "key": "intensity"
             }],
         "path": copy.deepcopy(mappedEntity["path"]),
     }
@@ -376,8 +395,11 @@ def getImpactEntity(mappedEntity, impact):
 def getConduceEntitySetJSON(ents):
     myEntities = {}
     myEntities["entities"] = ents
-    #return json.dumps(myEntities, indent=2)
-    return json.dumps(myEntities, separators=(',',':'))
+
+    if GENONLY_FORMAT == "JSON":
+        return json.dumps(myEntities, indent=2)
+    else:
+        return json.dumps(myEntities, separators=(',',':'))
 
 def printCSV(ents):
     entity = {}
@@ -385,13 +407,15 @@ def printCSV(ents):
         pos = entity.get("path")[0]
         posX = pos["x"]
         posY = pos["y"]
-        print "%s, %09f, %09f" % (entity["identity"], posX, posY)
+        conf = entity.get("attrs")[1]
+        confVal = conf["double-value"]
+        print "%d, %s, %s, %.9f, %.9f, %.1f" % (entity["timestamp-ms"]/1000, entity["identity"], "employee", posX, posY, confVal)
 
-def printEntities(timestampMs, ents):
-    #print
-    #print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
-    print getConduceEntitySetJSON(ents)
-    #printCSV(ents)
+def printEntities(ents):
+    if GENONLY_FORMAT == "JSON":
+        print getConduceEntitySetJSON(ents)
+    else:
+        printCSV(ents)
 
 
 #
@@ -421,8 +445,12 @@ def waitForUploadJob(authStr, jobURL):
             break
 
 def uploadEntities(apiKey, datasetId, hostServer, timestampMs, ents):
+    if GENONLY_FORMAT:
+        printEntities(ents)
+        return
+
     print datetime.fromtimestamp(timestampMs).strftime('%Y-%m-%d %H:%M:%S')
-    
+
     authStr = 'Bearer ' + apiKey
     URI = '/conduce/api/datasets/add_datav2/' + datasetId
     payload = getConduceEntitySetJSON(ents)
@@ -434,8 +462,7 @@ def uploadEntities(apiKey, datasetId, hostServer, timestampMs, ents):
     #print headers
 
     print "Uploading ", hostServer, URI
-    print payload
-    return
+    #print payload
 
     connection = httplib.HTTPSConnection(hostServer)
     connection.request("POST", URI, payload, headers)
@@ -462,31 +489,48 @@ def main():
     global SPEED_MAX_KPH
     global START_DATE
     global MAP_COORDS
-    global NEXT_IMPACT_TIME
+    global MAX_CONFIDENCE_VALUE
+    global GENONLY_FORMAT
+
+    random.seed(RANDOM_SEED)
+    
+    gen = arguments.get('--gen')
+    if gen:
+        if (gen == "JSON") or (gen == "CSV"):
+            GENONLY_FORMAT=gen
+        else:
+            print "Unsupported output format:", gen
+            return
 
     ENTITY_COUNT = int(arguments.get('--entity-count'))
     UPDATE_PERIOD_S = int(arguments.get('--period'))
     SPEED_MAX_KPH = int(arguments.get('--max-speed'))
+    MAX_CONFIDENCE_VALUE = float(arguments.get('--conf-dist'))
     START_DATE = arguments.get('--start-date')
 
-    hostServer = arguments.get('--host')
-    apiKey = str(arguments.get('--apikey'))
-    datasetIdCMX = str(arguments.get('--cmx-dataset'))
-    datasetIdIMS = str(arguments.get('--ims-dataset'))
+    hostServer=None
+    apiKey=None
+    datasetIdCMX=None
+    datasetIdIMS=None
 
-    if apiKey == 'None':
-        print "API Key required."
-        return
-    if datasetIdCMX == 'None':
-        print "CMX Dataset ID required."
-        return
-    if datasetIdIMS == 'None':
-        print "IMS Dataset ID required."
-        return
+    if not GENONLY_FORMAT:
+        hostServer = arguments.get('--host')
+        apiKey = str(arguments.get('--apikey'))
+        datasetIdCMX = str(arguments.get('--cmx-dataset'))
+        datasetIdIMS = str(arguments.get('--ims-dataset'))
 
-    #print apiKey
-    #print datasetIdCMX
-    #print datasetIdIMS
+        if apiKey == 'None':
+            print "API Key required."
+            return
+        if datasetIdCMX == 'None':
+            print "CMX Dataset ID required."
+            return
+        if datasetIdIMS == 'None':
+            print "IMS Dataset ID required."
+            return
+        #print apiKey
+        #print datasetIdCMX
+        #print datasetIdIMS
 
     nDays = getDays(START_DATE)
     startDateTime = getTime(START_DATE, START_TIME) + TIME_OFFSET
