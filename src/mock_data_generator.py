@@ -596,10 +596,10 @@ def main():
             tm += UPDATE_PERIOD_S
             updateLocations(tm)
             mapped = getMappedEntityPositions()
-            tBeg = time.time()
+            #tBeg = time.time()
             uploadEntities(apiKey, datasetIdCMX, hostServer, tm, mapped)
-            tEnd = time.time()
-            delayTime(UPDATE_PERIOD_S, tBeg, tEnd)
+            #tEnd = time.time()
+            #delayTime(UPDATE_PERIOD_S, tBeg, tEnd)
 
         if datasetIdIMS and len(impacts) > 0:
             #print "Numberof Impacts Today:", len(impacts)
