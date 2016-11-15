@@ -231,8 +231,8 @@ def initEntities(entityCount, startTime, startLoc):
     #print "Entities: ", entityCount
 
     attribs = [
-        { "key":"heading", "type":"INT64", "int64-value":0 },
-        { "key":"confidence", "type":"INT64", "int64-value":0 }
+        { "key":"heading", "type":"INT64", "int64_value":0 },
+        { "key":"confidence", "type":"INT64", "int64_value":0 }
     ]
 
     loc = []
@@ -243,7 +243,7 @@ def initEntities(entityCount, startTime, startLoc):
         entity = {
             "identity": str(i+1),
             "kind": "employee",
-            "timestamp-ms": int(startTime * 1000),
+            "timestamp_ms": int(startTime * 1000),
             #"endtime_ms": int(startTime * 1000) + 24*3600000,
             "path": copy.deepcopy(loc),
             "attrs": copy.deepcopy(attribs)
@@ -309,14 +309,14 @@ def updateEntityPosition( entity ):
     pos["x"] = newMove[1]
     pos["y"] = newMove[2]
     hdg = entity.get("attrs")[0]
-    hdg["int64-value"] = newMove[0]
+    hdg["int64_value"] = newMove[0]
     conf = entity.get("attrs")[1]
-    conf["int64-value"] = getPositionConfidence()
+    conf["int64_value"] = getPositionConfidence()
 
 # Update all the entities locations for the given time
 def updateLocations(tm):
     for entity in entities:
-        entity["timestamp-ms"] = tm * 1000
+        entity["timestamp_ms"] = tm * 1000
         updateEntityPosition(entity)
 
 # Translate the XY (percentage distance from the origin) to the coordinate system.
@@ -388,17 +388,17 @@ def getImpactEntity(mappedEntity, impact):
     IMPACT_COUNTER += 1
     
     impact_entity = {
-        "timestamp-ms": mappedEntity["timestamp-ms"],
+        "timestamp_ms": mappedEntity["timestamp_ms"],
         "identity": str(IMPACT_COUNTER),
         "kind": "impact",
         "attrs": [
             {
-                "int64-value": impact[0],
+                "int64_value": impact[0],
                 "type": "INT64",
                 "key": "level"
             },
             {
-                "str-value": str(impact[1]),
+                "str_value": str(impact[1]),
                 "type": "STRING",
                 "key": "intensity"
             }],
@@ -430,7 +430,7 @@ def printCSV(ents):
         posX = pos["x"]
         posY = pos["y"]
         conf = entity.get("attrs")[1]
-        confVal = conf["double-value"]
+        confVal = conf["double_value"]
         print "%d, %s, %s, %.9f, %.9f, %.1f" % (entity["timestamp-ms"]/1000, entity["identity"], "employee", posX, posY, confVal)
 
 def printEntities(ents):
